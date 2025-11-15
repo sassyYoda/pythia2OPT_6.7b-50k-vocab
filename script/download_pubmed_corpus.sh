@@ -19,7 +19,7 @@ export MAX_TOKENS=1000000000
 
 echo "Downloading and preparing PubMed abstract dataset..."
 echo "Output path: ${OUTPUT_PATH}"
-echo "Max tokens: ${MAX_TOKENS:,}"
+echo "Max tokens: ${MAX_TOKENS}"
 
 python script/download_pubmed_corpus.py \
     -o ${OUTPUT_PATH} \
