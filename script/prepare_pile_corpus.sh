@@ -13,8 +13,9 @@ export DATASET_NAME="common-pile/comma_v0.1_training_dataset"
 export SPLIT="train"
 export CACHE_DIR="${MAIN_DIR}/data/cache"
 
-# Optional: limit number of samples (set to empty string for all)
-export MAX_SAMPLES=""
+# Limit number of samples (30M is sufficient for fine-tuning)
+# Set to empty string to process all samples
+export MAX_SAMPLES=30000000
 
 # Use streaming mode for large datasets (set to empty string to disable)
 # Streaming is enabled by default to avoid downloading the entire Pile dataset
