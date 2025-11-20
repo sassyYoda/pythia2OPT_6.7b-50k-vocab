@@ -211,11 +211,17 @@ def main():
         print("Loading CulturaX dataset...")
         
         # Load multiple languages for multilingual corpus
-        # Using a diverse set of languages covering different language families
+        # Using the exact 30 languages from TokAlign paper (Nguyen et al., 2023)
+        # High-Langs (10): en, ru, es, de, fr, zh, it, pt, pl, ja
+        # Medium-Langs (10): cs, vi, fa, hu, el, ro, sv, uk, fi, ko
+        # Low-Langs (10): he, sr, ta, sq, az, kk, ur, ka, hy, is
         culturax_languages = [
-            'en', 'zh', 'es', 'fr', 'de', 'ja', 'ko', 'ar', 'hi', 'pt', 
-            'ru', 'it', 'nl', 'tr', 'pl', 'vi', 'th', 'id', 'cs', 'sv',
-            'ro', 'hu', 'da', 'fi', 'no', 'he', 'uk', 'bg', 'el', 'sk'
+            # High-Langs
+            'en', 'ru', 'es', 'de', 'fr', 'zh', 'it', 'pt', 'pl', 'ja',
+            # Medium-Langs
+            'cs', 'vi', 'fa', 'hu', 'el', 'ro', 'sv', 'uk', 'fi', 'ko',
+            # Low-Langs
+            'he', 'sr', 'ta', 'sq', 'az', 'kk', 'ur', 'ka', 'hy', 'is'
         ]
         
         culturax_datasets = []
