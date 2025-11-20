@@ -11,7 +11,7 @@ export MASTER_PORT=16900
 
 export MODEL="1b"
 
-export TGT="biogpt"
+export TGT="qwen2-7b"
 
 MODEL_NAME="./data/pythia2${TGT}/TokAlign-Init-1B"
 
