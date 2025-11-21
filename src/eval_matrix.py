@@ -29,6 +29,10 @@ def eval_trans_matrix(
     tgt_len = len(list(trans.keys()))
 
     total_b = 0
+    total_b1 = 0  # BLEU-1 only
+    total_b2 = 0  # BLEU-2 only
+    total_b3 = 0  # BLEU-3 only
+    total_b4 = 0  # BLEU-4 only
     # for s in tqdm(eval_data):
     for s in eval_data:
         # src: source token id, e.g., pythia ids, tgt: target token id, e.g., qwen2-7b ids
@@ -36,15 +40,32 @@ def eval_trans_matrix(
 
         # using td dict by maping target ids to source ids
         pred = [str(td[tid]) for tid in tgt]
+        
+        # Compute with specified weights (weighted average)
         total_b += sentence_bleu([src], pred, bleu_weights)
+        
+        # Compute individual BLEU scores
+        total_b1 += sentence_bleu([src], pred, (1, 0, 0, 0))  # BLEU-1
+        total_b2 += sentence_bleu([src], pred, (0, 1, 0, 0))  # BLEU-2
+        total_b3 += sentence_bleu([src], pred, (0, 0, 1, 0))  # BLEU-3
+        total_b4 += sentence_bleu([src], pred, (0, 0, 0, 1))  # BLEU-4
 
         # using td dict by maping source ids to target ids
         # pred = [str(td[sid]) for sid in src]
         # total_b += sentence_bleu([tgt], pred, bleu_weights)
 
-    print(f"Average bleu: {total_b/len(eval_data)}")
+    num_examples = len(eval_data)
+    
+    # Print individual BLEU scores
+    print(f"BLEU-1: {total_b1/num_examples:.6f}")
+    print(f"BLEU-2: {total_b2/num_examples:.6f}")
+    print(f"BLEU-3: {total_b3/num_examples:.6f}")
+    print(f"BLEU-4: {total_b4/num_examples:.6f}")
+    
+    # Print weighted average (using specified weights)
+    print(f"Average BLEU (weights {bleu_weights}): {total_b/num_examples:.6f}")
 
-    return total_b/len(eval_data)
+    return total_b/num_examples
 
 # BERT-Score
 def eval_bert_score(
