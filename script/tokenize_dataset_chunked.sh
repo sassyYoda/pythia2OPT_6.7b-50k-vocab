@@ -26,7 +26,7 @@ export BLOCK_SIZE=2048
 # Parallel processing settings
 # With 208 CPU cores, we can process multiple chunks simultaneously
 # Each chunk uses ~180 workers, so 2-3 chunks in parallel is safe
-export PARALLEL_CHUNKS=2  # Number of chunks to process in parallel (set to 1 for sequential)
+export PARALLEL_CHUNKS=5  # Number of chunks to process in parallel (set to 1 for sequential)
 
 # Temporary directory for chunks
 export CHUNK_DIR="./data/pretrain-corpus/chunks"
