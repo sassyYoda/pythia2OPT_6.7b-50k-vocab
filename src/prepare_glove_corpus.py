@@ -391,9 +391,11 @@ def main():
         print("Loading Proof-Pile-2 dataset (streaming mode)...")
         proof_pile_dataset = load_dataset(
             args.proof_pile_dataset, 
+            "default",  # Use "default" config for full dataset
             cache_dir=args.cache_dir, 
             streaming=True,
-            split="train"
+            split="train",
+            trust_remote_code=True
         )
         
         proof_pile_texts, actual_tokens = sample_from_dataset(
@@ -402,6 +404,8 @@ def main():
         all_texts.extend(proof_pile_texts)
     except Exception as e:
         print(f"Error loading Proof-Pile-2: {e}")
+        import traceback
+        traceback.print_exc()
         print("Skipping Proof-Pile-2. Please check dataset availability.")
     
     # Shuffle all texts
