@@ -126,13 +126,14 @@ moderate_cleanup() {
         echo "  ✓ Removed intermediate checkpoints (kept checkpoint-2500)"
     fi
     
-    # HuggingFace cache (can be re-downloaded)
+    # HuggingFace cache (can be re-downloaded) - THIS IS LIKELY HUGE!
     if [ -d "./data/cache" ]; then
         CACHE_SIZE=$(get_size "./data/cache")
         echo "HuggingFace cache size: ${CACHE_SIZE}"
-        if confirm "Remove HuggingFace cache? (can be re-downloaded)"; then
+        echo "  WARNING: Cache can be very large (5TB+). This is safe to delete but will require re-downloading datasets if you need them again."
+        if confirm "Remove HuggingFace cache? (will free ~${CACHE_SIZE}, can be re-downloaded)"; then
             rm -rf ./data/cache/* 2>/dev/null
-            echo "  ✓ Removed HuggingFace cache"
+            echo "  ✓ Removed HuggingFace cache (freed ~${CACHE_SIZE})"
         fi
     fi
     
@@ -157,15 +158,16 @@ aggressive_cleanup() {
     echo ""
     echo "KEEPING:"
     echo "  - Final trained models (log/*/checkpoint-2500)"
+    echo "  - Final tokenized dataset (data/pretrain-dataset/pile00-qwen2-7b-tokenized)"
     echo "  - Alignment matrices (data/pythia2qwen2-7b/align_matrix.json)"
     echo "  - GloVe vectors (data/vec-*.txt)"
-    echo "  - Evaluation results"
     echo ""
     echo "REMOVING:"
-    echo "  - All tokenized datasets"
+    echo "  - Chunk files (~176GB)"
+    echo "  - Tokenized chunks (~176GB)"
+    echo "  - Original corpus (~176GB)"
+    echo "  - HuggingFace cache (~5TB)"
     echo "  - All intermediate checkpoints"
-    echo "  - All caches"
-    echo "  - All corpus files"
     echo "  - All logs"
     echo ""
     
