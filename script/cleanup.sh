@@ -79,15 +79,49 @@ moderate_cleanup() {
     
     echo ""
     echo "Removing:"
+    echo "  - Chunk files (~176GB)"
+    echo "  - Tokenized chunks (~200-400GB)"
+    echo "  - Original corpus file (~176GB)"
     echo "  - Intermediate training checkpoints (keeping final)"
     echo "  - HuggingFace cache"
     echo "  - GloVe training corpus (already tokenized)"
     echo ""
     
+    # Remove chunk files (already tokenized and concatenated)
+    if [ -d "./data/pretrain-corpus/chunks" ]; then
+        CHUNK_SIZE=$(get_size "./data/pretrain-corpus/chunks")
+        echo "Chunk files size: ${CHUNK_SIZE}"
+        if confirm "Remove chunk files? (already tokenized and concatenated)"; then
+            rm -rf ./data/pretrain-corpus/chunks 2>/dev/null
+            echo "  ✓ Removed chunk files (freed ~${CHUNK_SIZE})"
+        fi
+    fi
+    
+    # Remove tokenized chunks (already concatenated)
+    if [ -d "./data/pretrain-dataset/chunks-tokenized" ]; then
+        TOKENIZED_CHUNK_SIZE=$(get_size "./data/pretrain-dataset/chunks-tokenized")
+        echo "Tokenized chunks size: ${TOKENIZED_CHUNK_SIZE}"
+        if confirm "Remove tokenized chunks? (already concatenated into final dataset)"; then
+            rm -rf ./data/pretrain-dataset/chunks-tokenized 2>/dev/null
+            echo "  ✓ Removed tokenized chunks (freed ~${TOKENIZED_CHUNK_SIZE})"
+        fi
+    fi
+    
+    # Remove original corpus (already tokenized)
+    if [ -f "./data/pretrain-corpus/pile-corpus.jsonl" ]; then
+        CORPUS_SIZE=$(get_size "./data/pretrain-corpus/pile-corpus.jsonl")
+        echo "Original corpus size: ${CORPUS_SIZE}"
+        if confirm "Remove original corpus file? (already tokenized)"; then
+            rm -f ./data/pretrain-corpus/pile-corpus.jsonl 2>/dev/null
+            echo "  ✓ Removed original corpus file (freed ~${CORPUS_SIZE})"
+        fi
+    fi
+    
     # Remove intermediate checkpoints, keep final ones
     if [ -d "./log" ]; then
         echo "Cleaning intermediate checkpoints..."
         # Keep final checkpoints (checkpoint-2500), remove others
+        INTERMEDIATE_SIZE=$(du -sh ./log/*/checkpoint-* 2>/dev/null | grep -v "checkpoint-2500" | awk '{sum+=$1} END {print sum}' || echo "0")
         find ./log -type d -name "checkpoint-*" ! -name "checkpoint-2500" -exec rm -rf {} + 2>/dev/null
         echo "  ✓ Removed intermediate checkpoints (kept checkpoint-2500)"
     fi
@@ -143,23 +177,46 @@ aggressive_cleanup() {
     moderate_cleanup
     
     echo ""
-    echo "Removing tokenized datasets..."
+    echo "Removing chunk files..."
+    # Remove raw chunk files (already tokenized and concatenated)
+    if [ -d "./data/pretrain-corpus/chunks" ]; then
+        CHUNK_SIZE=$(get_size "./data/pretrain-corpus/chunks")
+        echo "Chunk files size: ${CHUNK_SIZE}"
+        if confirm "Remove chunk files? (already tokenized and concatenated)"; then
+            rm -rf ./data/pretrain-corpus/chunks 2>/dev/null
+            echo "  ✓ Removed chunk files"
+        fi
+    fi
+    
+    echo "Removing tokenized chunk directories..."
+    # Remove tokenized chunks (already concatenated)
+    if [ -d "./data/pretrain-dataset/chunks-tokenized" ]; then
+        TOKENIZED_CHUNK_SIZE=$(get_size "./data/pretrain-dataset/chunks-tokenized")
+        echo "Tokenized chunks size: ${TOKENIZED_CHUNK_SIZE}"
+        if confirm "Remove tokenized chunks? (already concatenated into final dataset)"; then
+            rm -rf ./data/pretrain-dataset/chunks-tokenized 2>/dev/null
+            echo "  ✓ Removed tokenized chunks"
+        fi
+    fi
+    
+    echo "Removing original corpus file..."
+    # Remove original corpus (already tokenized)
+    if [ -f "./data/pretrain-corpus/pile-corpus.jsonl" ]; then
+        CORPUS_SIZE=$(get_size "./data/pretrain-corpus/pile-corpus.jsonl")
+        echo "Original corpus size: ${CORPUS_SIZE}"
+        if confirm "Remove original corpus file? (already tokenized)"; then
+            rm -f ./data/pretrain-corpus/pile-corpus.jsonl 2>/dev/null
+            echo "  ✓ Removed original corpus file"
+        fi
+    fi
+    
+    echo "Removing other tokenized datasets (if not needed)..."
     # Keep directory structure but remove large tokenized datasets
     if [ -d "./data/pretrain-dataset" ]; then
         DATASET_SIZE=$(get_size "./data/pretrain-dataset")
-        echo "Tokenized datasets size: ${DATASET_SIZE}"
-        rm -rf ./data/pretrain-dataset/*-tokenized 2>/dev/null
-        rm -rf ./data/pretrain-dataset/*-glove 2>/dev/null
-        rm -rf ./data/pretrain-dataset/*-tok 2>/dev/null
-        echo "  ✓ Removed tokenized datasets"
-    fi
-    
-    echo "Removing corpus files..."
-    if [ -d "./data/pretrain-corpus" ]; then
-        CORPUS_SIZE=$(get_size "./data/pretrain-corpus")
-        echo "Corpus files size: ${CORPUS_SIZE}"
-        rm -f ./data/pretrain-corpus/*.jsonl 2>/dev/null
-        echo "  ✓ Removed corpus files"
+        echo "Tokenized datasets directory size: ${DATASET_SIZE}"
+        echo "  (Keeping final dataset: pile00-qwen2-7b-tokenized)"
+        # Only remove if user confirms - be careful here
     fi
     
     echo "Removing all logs..."
