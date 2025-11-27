@@ -22,6 +22,10 @@ export CACHE_DIR="${MAIN_DIR}/data/cache"  # Optional: specify cache directory f
 export DEVICE="cuda"  # Options: cuda or cpu
 export DIRECTIONS="both"  # Options: both, es-en, en-es
 
+# Batch sizes (optimized for H100 GPU)
+export TRANSLATION_BATCH_SIZE=16  # Batch size for translation generation
+export PERPLEXITY_BATCH_SIZE=32  # Batch size for perplexity computation
+
 # Check if model checkpoint exists
 if [ ! -d "${MODEL_PATH}" ]; then
     echo "Error: Model checkpoint not found at ${MODEL_PATH}"
@@ -37,6 +41,8 @@ echo "Dataset: OPUS Global Voices (Spanish-English)"
 echo "Split: ${DATASET_SPLIT}"
 echo "Max samples: ${MAX_SAMPLES:-all}"
 echo "Directions: ${DIRECTIONS}"
+echo "Translation batch size: ${TRANSLATION_BATCH_SIZE}"
+echo "Perplexity batch size: ${PERPLEXITY_BATCH_SIZE}"
 echo "Output directory: ${OUTPUT_DIR}"
 echo "=========================================="
 echo ""
@@ -47,7 +53,9 @@ CMD="python src/eval_translation.py \
     --dataset_split ${DATASET_SPLIT} \
     --output_dir ${OUTPUT_DIR} \
     --device ${DEVICE} \
-    --directions ${DIRECTIONS}"
+    --directions ${DIRECTIONS} \
+    --translation_batch_size ${TRANSLATION_BATCH_SIZE} \
+    --perplexity_batch_size ${PERPLEXITY_BATCH_SIZE}"
 
 if [ -n "${MAX_SAMPLES}" ]; then
     CMD="${CMD} --max_samples ${MAX_SAMPLES}"

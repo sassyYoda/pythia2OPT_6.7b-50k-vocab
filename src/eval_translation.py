@@ -13,6 +13,7 @@ from datasets import load_dataset
 from tqdm import tqdm
 import sacrebleu
 from sacrebleu.metrics import BLEU
+import numpy as np
 
 def load_model_and_tokenizer(
     model_path: str,
@@ -111,6 +112,62 @@ def generate_translation(
     return translation.strip()
 
 
+def generate_translations_batch(
+    model,
+    tokenizer,
+    source_texts: List[str],
+    direction: str = "es-en",
+    prompt_template: Optional[str] = None,
+    max_length: int = 512,
+    max_new_tokens: int = 256,
+    temperature: float = 0.7,
+    top_p: float = 0.9,
+    device: str = "cuda"
+) -> List[str]:
+    """Generate translations for a batch of source texts."""
+    # Create prompts for all texts
+    prompts = [create_translation_prompt(text, direction, prompt_template) for text in source_texts]
+    
+    # Tokenize all inputs with padding
+    inputs = tokenizer(
+        prompts,
+        return_tensors="pt",
+        padding=True,
+        truncation=True,
+        max_length=max_length
+    ).to(device)
+    
+    # Get actual input lengths (excluding padding) for each sequence
+    if inputs.get('attention_mask') is not None:
+        input_lengths = inputs['attention_mask'].sum(dim=1).cpu().tolist()
+    else:
+        # If no attention mask, assume all sequences are the same length
+        input_lengths = [inputs['input_ids'].shape[1]] * len(source_texts)
+    
+    # Generate translations for the batch
+    with torch.no_grad():
+        outputs = model.generate(
+            **inputs,
+            max_new_tokens=max_new_tokens,
+            temperature=temperature,
+            top_p=top_p,
+            do_sample=True,
+            pad_token_id=tokenizer.pad_token_id,
+            eos_token_id=tokenizer.eos_token_id,
+        )
+    
+    # Decode only the generated parts (remove input prompts)
+    translations = []
+    for i, output in enumerate(outputs):
+        # Extract only the generated tokens (after the input prompt)
+        input_len = input_lengths[i]
+        generated_ids = output[input_len:]
+        translation = tokenizer.decode(generated_ids, skip_special_tokens=True)
+        translations.append(translation.strip())
+    
+    return translations
+
+
 def load_opus_globalvoices(
     split: str = "test",
     max_samples: Optional[int] = None,
@@ -200,14 +257,14 @@ def evaluate_translation(
     direction: str,
     prompt_template: Optional[str] = None,
     max_samples: Optional[int] = None,
-    batch_size: int = 1,
+    batch_size: int = 16,
     device: str = "cuda",
     max_new_tokens: int = 256,
     temperature: float = 0.7,
     top_p: float = 0.9
 ) -> dict:
     """Evaluate translation quality using BLEU scores."""
-    print(f"\nEvaluating {direction} translation...")
+    print(f"\nEvaluating {direction} translation (batch_size={batch_size})...")
     
     if max_samples:
         source_texts = source_texts[:max_samples]
@@ -216,26 +273,47 @@ def evaluate_translation(
     predictions = []
     references = []
     
-    # Generate translations
-    for i in tqdm(range(len(source_texts)), desc=f"Generating {direction} translations"):
-        source = source_texts[i]
-        reference = target_texts[i]
+    # Generate translations in batches
+    num_batches = (len(source_texts) + batch_size - 1) // batch_size
+    for batch_idx in tqdm(range(num_batches), desc=f"Generating {direction} translations"):
+        start_idx = batch_idx * batch_size
+        end_idx = min(start_idx + batch_size, len(source_texts))
+        
+        batch_sources = source_texts[start_idx:end_idx]
+        batch_targets = target_texts[start_idx:end_idx]
         
         try:
-            prediction = generate_translation(
-                model, tokenizer, source, direction=direction,
+            batch_predictions = generate_translations_batch(
+                model, tokenizer,
+                batch_sources,
+                direction=direction,
                 prompt_template=prompt_template,
                 max_new_tokens=max_new_tokens,
                 temperature=temperature,
                 top_p=top_p,
                 device=device
             )
-            predictions.append(prediction)
-            references.append(reference)
+            predictions.extend(batch_predictions)
+            references.extend(batch_targets)
         except Exception as e:
-            print(f"Error translating example {i}: {e}")
-            predictions.append("")
-            references.append(reference)
+            print(f"Error translating batch {batch_idx} (examples {start_idx}-{end_idx-1}): {e}")
+            # Fall back to individual generation for this batch
+            for i, (source, reference) in enumerate(zip(batch_sources, batch_targets)):
+                try:
+                    prediction = generate_translation(
+                        model, tokenizer, source, direction=direction,
+                        prompt_template=prompt_template,
+                        max_new_tokens=max_new_tokens,
+                        temperature=temperature,
+                        top_p=top_p,
+                        device=device
+                    )
+                    predictions.append(prediction)
+                    references.append(reference)
+                except Exception as e2:
+                    print(f"Error translating example {start_idx + i}: {e2}")
+                    predictions.append("")
+                    references.append(reference)
     
     # Compute BLEU scores
     bleu = BLEU()
@@ -267,6 +345,132 @@ def evaluate_translation(
     }
     
     return results, predictions, references
+
+
+def compute_perplexity(
+    model,
+    tokenizer,
+    texts: List[str],
+    language: str,
+    batch_size: int = 8,
+    max_length: int = 512,
+    device: str = "cuda",
+    max_samples: Optional[int] = None
+) -> dict:
+    """Compute perplexity on a list of texts.
+    
+    Args:
+        model: The language model
+        tokenizer: The tokenizer
+        texts: List of texts to evaluate
+        language: Language name (for logging)
+        batch_size: Batch size for processing
+        max_length: Maximum sequence length
+        device: Device to run on
+        max_samples: Maximum number of samples to evaluate
+    
+    Returns:
+        Dictionary with perplexity metrics
+    """
+    print(f"\nComputing perplexity on {language} texts...")
+    
+    if max_samples:
+        texts = texts[:max_samples]
+    
+    model.eval()
+    total_loss = 0.0
+    total_tokens = 0
+    num_valid_samples = 0
+    
+    # Process in batches
+    for i in tqdm(range(0, len(texts), batch_size), desc=f"Computing {language} perplexity"):
+        batch_texts = texts[i:i + batch_size]
+        batch_losses = []
+        batch_token_counts = []
+        
+        for text in batch_texts:
+            try:
+                # Tokenize text
+                inputs = tokenizer(
+                    text,
+                    return_tensors="pt",
+                    padding=True,
+                    truncation=True,
+                    max_length=max_length
+                ).to(device)
+                
+                input_ids = inputs["input_ids"]
+                attention_mask = inputs.get("attention_mask", None)
+                
+                # Skip if empty
+                if input_ids.shape[1] < 2:
+                    continue
+                
+                # Get model outputs
+                with torch.no_grad():
+                    outputs = model(
+                        input_ids=input_ids,
+                        attention_mask=attention_mask,
+                        labels=input_ids
+                    )
+                    
+                    # Compute loss (cross-entropy)
+                    # Shift so that tokens < n predict n
+                    shift_logits = outputs.logits[..., :-1, :].contiguous()
+                    shift_labels = input_ids[..., 1:].contiguous()
+                    
+                    # Flatten the tokens
+                    loss_fct = torch.nn.CrossEntropyLoss(reduction='none')
+                    flat_logits = shift_logits.view(-1, shift_logits.size(-1))
+                    flat_labels = shift_labels.view(-1)
+                    
+                    # Compute per-token loss
+                    per_token_loss = loss_fct(flat_logits, flat_labels)
+                    
+                    # Mask out padding tokens if attention mask is provided
+                    if attention_mask is not None:
+                        shift_mask = attention_mask[..., 1:].contiguous().view(-1)
+                        per_token_loss = per_token_loss * shift_mask
+                        num_tokens = shift_mask.sum().item()
+                    else:
+                        num_tokens = flat_labels.numel()
+                    
+                    # Average loss (excluding padding)
+                    if num_tokens > 0:
+                        avg_loss = (per_token_loss.sum() / num_tokens).item()
+                        batch_losses.append(avg_loss)
+                        batch_token_counts.append(num_tokens)
+                        num_valid_samples += 1
+                        
+            except Exception as e:
+                print(f"Error computing perplexity for sample {i}: {e}")
+                continue
+        
+        # Accumulate losses
+        if batch_losses:
+            for loss, num_tokens in zip(batch_losses, batch_token_counts):
+                total_loss += loss * num_tokens
+                total_tokens += num_tokens
+    
+    # Compute average loss and perplexity
+    if total_tokens > 0:
+        avg_loss = total_loss / total_tokens
+        perplexity = np.exp(avg_loss)
+    else:
+        avg_loss = float('inf')
+        perplexity = float('inf')
+    
+    results = {
+        "language": language,
+        "num_samples": num_valid_samples,
+        "total_tokens": total_tokens,
+        "average_loss": avg_loss,
+        "perplexity": perplexity
+    }
+    
+    print(f"{language} Perplexity: {perplexity:.4f} (avg loss: {avg_loss:.4f}, {num_valid_samples} samples, {total_tokens} tokens)")
+    
+    return results
 
 
 def save_results(
@@ -372,6 +576,24 @@ def main():
         default=0.9,
         help="Top-p (nucleus) sampling parameter"
     )
+    parser.add_argument(
+        "--compute_perplexity",
+        action="store_true",
+        default=True,
+        help="Compute perplexity on English and Spanish texts"
+    )
+    parser.add_argument(
+        "--perplexity_batch_size",
+        type=int,
+        default=32,
+        help="Batch size for perplexity computation (default: 32 for H100)"
+    )
+    parser.add_argument(
+        "--translation_batch_size",
+        type=int,
+        default=16,
+        help="Batch size for translation generation (default: 16 for H100)"
+    )
     
     args = parser.parse_args()
     
@@ -393,6 +615,49 @@ def main():
     
     all_results = {}
     
+    # Compute perplexity on English and Spanish texts
+    if args.compute_perplexity:
+        print(f"\n{'='*60}")
+        print(f"Computing Perplexity Metrics")
+        print(f"{'='*60}")
+        
+        spanish_perplexity = compute_perplexity(
+            model, tokenizer,
+            spanish_texts,
+            language="Spanish",
+            batch_size=args.perplexity_batch_size,
+            device=args.device,
+            max_samples=args.max_samples
+        )
+        all_results["spanish_perplexity"] = spanish_perplexity
+        
+        english_perplexity = compute_perplexity(
+            model, tokenizer,
+            english_texts,
+            language="English",
+            batch_size=args.perplexity_batch_size,
+            device=args.device,
+            max_samples=args.max_samples
+        )
+        all_results["english_perplexity"] = english_perplexity
+        
+        # Save perplexity results
+        perplexity_path = os.path.join(args.output_dir, "perplexity_metrics.json")
+        os.makedirs(args.output_dir, exist_ok=True)
+        with open(perplexity_path, "w", encoding="utf-8") as f:
+            json.dump({
+                "spanish": spanish_perplexity,
+                "english": english_perplexity
+            }, f, indent=2, ensure_ascii=False)
+        print(f"Perplexity results saved to {perplexity_path}")
+        
+        print(f"\n{'='*60}")
+        print(f"Perplexity Summary:")
+        print(f"{'='*60}")
+        print(f"Spanish Perplexity: {spanish_perplexity['perplexity']:.4f}")
+        print(f"English Perplexity: {english_perplexity['perplexity']:.4f}")
+        print(f"{'='*60}\n")
+    
     # Evaluate Spanish -> English
     if args.directions in ["both", "es-en"]:
         es_en_results, es_en_preds, es_en_refs = evaluate_translation(
@@ -401,6 +666,7 @@ def main():
             direction="es-en",
             prompt_template=args.prompt_template_es_en,
             max_samples=args.max_samples,
+            batch_size=args.translation_batch_size,
             device=args.device,
             max_new_tokens=args.max_new_tokens,
             temperature=args.temperature,
@@ -431,6 +697,7 @@ def main():
             direction="en-es",
             prompt_template=args.prompt_template_en_es,
             max_samples=args.max_samples,
+            batch_size=args.translation_batch_size,
             device=args.device,
             max_new_tokens=args.max_new_tokens,
             temperature=args.temperature,
