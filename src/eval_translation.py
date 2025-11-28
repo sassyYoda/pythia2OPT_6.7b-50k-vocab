@@ -145,8 +145,19 @@ def generate_translation(
         )
     
     # Decode only the generated part (remove input)
-    generated_ids = outputs[0][inputs['input_ids'].shape[1]:]
+    input_length = inputs['input_ids'].shape[1]
+    generated_ids = outputs[0][input_length:]
     translation = tokenizer.decode(generated_ids, skip_special_tokens=True)
+    
+    # Clean up: remove any prompt that might have been regenerated
+    # Check if translation starts with the prompt and remove it
+    if translation.startswith(prompt):
+        translation = translation[len(prompt):].strip()
+    
+    # Remove any repeated prompt patterns
+    prompt_clean = prompt.strip()
+    while translation.startswith(prompt_clean):
+        translation = translation[len(prompt_clean):].strip()
     
     return translation.strip()
 
@@ -202,6 +213,19 @@ def generate_translations_batch(
         input_len = input_lengths[i]
         generated_ids = output[input_len:]
         translation = tokenizer.decode(generated_ids, skip_special_tokens=True)
+        
+        # Clean up: remove any prompt that might have been regenerated
+        prompt = prompts[i]
+        prompt_clean = prompt.strip()
+        
+        # Remove prompt if it appears at the start
+        if translation.startswith(prompt_clean):
+            translation = translation[len(prompt_clean):].strip()
+        
+        # Remove any repeated prompt patterns
+        while translation.startswith(prompt_clean):
+            translation = translation[len(prompt_clean):].strip()
+        
         translations.append(translation.strip())
     
     return translations
