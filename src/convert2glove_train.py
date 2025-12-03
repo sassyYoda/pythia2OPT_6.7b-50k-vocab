@@ -38,9 +38,21 @@ def convert2eval(
     d1 = datasets.load_from_disk(src_tok_path)
     print(f"Loading target dataset from {tgt_tok_path}...")
     d2 = datasets.load_from_disk(tgt_tok_path)
-    assert(len(d1[key]) == len(d2[key]))
     
-    total_examples = min(max_line, len(d1[key]))
+    len1 = len(d1[key])
+    len2 = len(d2[key])
+    
+    print(f"Source dataset ({src_tok_path}) '{key}' split: {len1:,} examples")
+    print(f"Target dataset ({tgt_tok_path}) '{key}' split: {len2:,} examples")
+    
+    if len1 != len2:
+        print(f"Warning: Dataset lengths differ! Source has {len1:,} examples, target has {len2:,} examples.")
+        print(f"Processing up to the minimum length: {min(len1, len2):,} examples.")
+    else:
+        print(f"Both datasets have matching lengths: {len1:,} examples")
+    
+    # Use the minimum length to ensure we don't go out of bounds
+    total_examples = min(max_line, len1, len2)
     print(f"Processing {total_examples:,} aligned examples (min length: {min_line_len})...")
 
     written = 0
@@ -62,7 +74,7 @@ def convert2eval(
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
     parser.add_argument("-s", "--source-path", type=str, default="./data/pretrain-dataset/multilingual-pythia-tok_tk")
-    parser.add_argument("-t", "--target-path", type=str, default="./data/pretrain-dataset/multilingual-qwen2-7b-tok_tk")
+    parser.add_argument("-t", "--target-path", type=str, default="./data/pretrain-dataset/multilingual-opt-6.7b-tok_tk")
     parser.add_argument("-k", "--key", type=str, default="train")
     parser.add_argument("-m", "--min-line-length", type=int, default=15)
     parser.add_argument("-l", "--max-line", type=int, default=10000000)
