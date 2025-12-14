@@ -128,6 +128,34 @@ def plot_agreement_bar_chart(metrics, output_path):
     print(f"Saved agreement bar chart to {output_path}")
 
 
+def plot_agreement_pie_chart(categories, output_path):
+    """Create pie chart showing agreement vs disagreement for non-gold tokens."""
+    fig, ax = plt.subplots(figsize=(8, 8))
+    
+    labels = ['Agree', 'Disagree']
+    sizes = [categories['agree'], categories['disagree']]
+    colors = ['#2ecc71', '#e74c3c']
+    explode = (0.05, 0.05)  # Slight separation
+    
+    wedges, texts, autotexts = ax.pie(sizes, explode=explode, labels=labels, colors=colors,
+                                      autopct='%1.1f%%', shadow=True, startangle=90,
+                                      textprops={'fontsize': 12, 'fontweight': 'bold'})
+    
+    ax.set_title('RelRep vs Vanilla Agreement\n(Non-Gold Tokens Only)', 
+                fontsize=14, fontweight='bold', pad=20)
+    
+    # Add count annotation
+    total = categories['total']
+    ax.text(0, -1.3, f'Total Non-Gold Tokens: {total:,}',
+            ha='center', fontsize=11,
+            bbox=dict(boxstyle='round', facecolor='wheat', alpha=0.5))
+    
+    plt.tight_layout()
+    plt.savefig(output_path, dpi=300, bbox_inches='tight')
+    plt.close()
+    print(f"Saved agreement pie chart to {output_path}")
+
+
 def plot_venn_diagram(metrics, output_path):
     """Create Venn diagram showing agreement overlap."""
     if venn2 is None:
