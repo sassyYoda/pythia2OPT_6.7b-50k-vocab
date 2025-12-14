@@ -477,8 +477,40 @@ def main():
     with open(args.output_path, 'w') as f:
         json.dump(alignment, f, indent=2)
     
+    # Save anchor tokens for reference
+    anchor_output_path = args.output_path.replace('.json', '_anchors.json')
+    anchor_data = {
+        "num_anchors": len(source_anchor_ids),
+        "seed": args.seed,
+        "source_anchor_ids": source_anchor_ids,
+        "target_anchor_ids": target_anchor_ids,
+        "source_anchor_tokens": [
+            source_tokenizer.convert_ids_to_tokens([aid])[0] 
+            for aid in source_anchor_ids
+        ],
+        "target_anchor_tokens": [
+            target_tokenizer.convert_ids_to_tokens([aid])[0] 
+            for aid in target_anchor_ids
+        ],
+        "anchor_pairs": [
+            {
+                "source_id": source_anchor_ids[i],
+                "target_id": target_anchor_ids[i],
+                "source_token": source_tokenizer.convert_ids_to_tokens([source_anchor_ids[i]])[0],
+                "target_token": target_tokenizer.convert_ids_to_tokens([target_anchor_ids[i]])[0]
+            }
+            for i in range(len(source_anchor_ids))
+        ]
+    }
+    
+    print(f"Saving anchor tokens to {anchor_output_path}...")
+    with open(anchor_output_path, 'w') as f:
+        json.dump(anchor_data, f, indent=2)
+    
     print("\n" + "="*80)
     print("✓ Token alignment with relative representations complete!")
+    print(f"✓ Alignment matrix saved to: {args.output_path}")
+    print(f"✓ Anchor tokens saved to: {anchor_output_path}")
     print("="*80)
 
 
