@@ -26,28 +26,41 @@ def load_alignment_matrix(path):
         return json.load(f)
 
 
-def get_non_gold_tokens(align_relrep, align_vanilla, gold_mappings):
-    """Get tokens that are NOT in gold mappings (i.e., aligned by methodology)."""
-    gold_target_ids = set(gold_mappings.keys())
-    all_target_ids = set(align_relrep.keys()) | set(align_vanilla.keys())
-    non_gold_ids = all_target_ids - gold_target_ids
-    return non_gold_ids
-
-
-def compute_exact_agreement(align_relrep, align_vanilla, gold_mappings):
-    """Compute exact agreement rate between two alignment matrices for NON-GOLD tokens only."""
-    non_gold_ids = get_non_gold_tokens(align_relrep, align_vanilla, gold_mappings)
+def get_learned_tokens(align_relrep, align_vanilla, gold_mappings, vocab_size=50272):
+    """Get tokens that are NOT in gold mappings (i.e., aligned by methodology).
     
-    exact_matches = 0
+    CRITICAL: We need to use the full vocabulary range, not just what's in the alignment matrices.
+    """
+    # Get all target token IDs from full vocabulary
+    all_target_tokens = set(range(vocab_size))
+    
+    # Get gold-mapped token IDs (convert keys to int for comparison)
+    gold_tokens = set(int(k) for k in gold_mappings.keys())
+    
+    # Learned tokens = all tokens - gold tokens
+    learned_tokens = all_target_tokens - gold_tokens
+    
+    return learned_tokens, gold_tokens, all_target_tokens
+
+
+def compute_exact_agreement(align_relrep, align_vanilla, learned_tokens):
+    """Compute exact agreement rate between two alignment matrices for LEARNED tokens only."""
+    agreement_count = 0
     total = 0
     
-    for target_id in non_gold_ids:
-        if target_id in align_relrep and target_id in align_vanilla:
-            if align_relrep[target_id] == align_vanilla[target_id]:
-                exact_matches += 1
+    for token_id in learned_tokens:
+        token_id_str = str(token_id)
+        
+        if token_id_str in align_relrep and token_id_str in align_vanilla:
+            relrep_choice = align_relrep[token_id_str]
+            vanilla_choice = align_vanilla[token_id_str]
+            
+            if relrep_choice == vanilla_choice:
+                agreement_count += 1
             total += 1
     
-    return exact_matches, total, exact_matches / total if total > 0 else 0.0
+    exact_agreement_rate = agreement_count / total if total > 0 else 0.0
+    return agreement_count, total, exact_agreement_rate
 
 
 def compute_gold_agreement(align_matrix, gold_mappings):
@@ -64,96 +77,159 @@ def compute_gold_agreement(align_matrix, gold_mappings):
     return correct, total, correct / total if total > 0 else 0.0
 
 
-def analyze_agreement_categories(align_relrep, align_vanilla, gold_mappings):
-    """Categorize agreements for NON-GOLD tokens only."""
-    non_gold_ids = get_non_gold_tokens(align_relrep, align_vanilla, gold_mappings)
+def analyze_learned_tokens(align_relrep, align_vanilla, learned_tokens, gold_mappings):
+    """Comprehensive analysis of learned tokens."""
+    agreements = []
+    disagreements = []
     
-    categories = {
-        'agree': 0,  # Both methods agree
-        'disagree': 0,  # Methods disagree
-        'total': 0
-    }
+    # Get gold source tokens
+    gold_source_tokens = set(gold_mappings.values())
     
-    for target_id in non_gold_ids:
-        if target_id not in align_relrep or target_id not in align_vanilla:
+    relrep_uses_gold_sources = 0
+    vanilla_uses_gold_sources = 0
+    
+    relrep_sources = []
+    vanilla_sources = []
+    
+    for token_id in learned_tokens:
+        token_id_str = str(token_id)
+        
+        if token_id_str not in align_relrep or token_id_str not in align_vanilla:
             continue
         
-        relrep_source = align_relrep[target_id]
-        vanilla_source = align_vanilla[target_id]
+        relrep_choice = align_relrep[token_id_str]
+        vanilla_choice = align_vanilla[token_id_str]
         
-        if relrep_source == vanilla_source:
-            categories['agree'] += 1
+        relrep_sources.append(relrep_choice)
+        vanilla_sources.append(vanilla_choice)
+        
+        if relrep_choice == vanilla_choice:
+            agreements.append(token_id)
         else:
-            categories['disagree'] += 1
-        categories['total'] += 1
+            disagreements.append(token_id)
+        
+        # Check if mapping uses gold source tokens
+        if relrep_choice in gold_source_tokens:
+            relrep_uses_gold_sources += 1
+        if vanilla_choice in gold_source_tokens:
+            vanilla_uses_gold_sources += 1
     
-    return categories
+    total_analyzed = len(agreements) + len(disagreements)
+    
+    # Compute diversity (unique sources)
+    relrep_unique_sources = len(set(relrep_sources))
+    vanilla_unique_sources = len(set(vanilla_sources))
+    
+    results = {
+        'agreements': agreements,
+        'disagreements': disagreements,
+        'total_analyzed': total_analyzed,
+        'relrep_uses_gold_sources': relrep_uses_gold_sources,
+        'vanilla_uses_gold_sources': vanilla_uses_gold_sources,
+        'relrep_gold_source_rate': relrep_uses_gold_sources / total_analyzed if total_analyzed > 0 else 0.0,
+        'vanilla_gold_source_rate': vanilla_uses_gold_sources / total_analyzed if total_analyzed > 0 else 0.0,
+        'relrep_unique_sources': relrep_unique_sources,
+        'vanilla_unique_sources': vanilla_unique_sources,
+        'relrep_diversity': relrep_unique_sources / total_analyzed if total_analyzed > 0 else 0.0,
+        'vanilla_diversity': vanilla_unique_sources / total_analyzed if total_analyzed > 0 else 0.0
+    }
+    
+    return results
 
 
-def plot_agreement_bar_chart(metrics, output_path):
-    """Create bar chart comparing agreement metrics."""
-    fig, ax = plt.subplots(figsize=(12, 6))
+def plot_agreement_learned_only(metrics, learned_analysis, output_path):
+    """Create visualization focusing on learned tokens only."""
+    fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(14, 6))
     
-    # Main comparison: Non-gold tokens
-    categories = ['Method Agreement\n(Non-Gold)', 'RelRep-Gold\n(Verification)', 'Vanilla-Gold\n(Verification)']
+    # Left: Simple bar chart
+    exact_agreement_rate = metrics['exact_agreement_rate']
+    categories = ['Exact Agreement\n(Learned Tokens)']
+    
+    bars = ax1.bar(categories, [exact_agreement_rate], color='steelblue', width=0.4, alpha=0.7, edgecolor='black')
+    ax1.set_ylim(0, 1.0)
+    ax1.set_ylabel('Agreement Rate', fontsize=12)
+    ax1.set_title('Agreement on Learned Tokens Only', fontsize=13, fontweight='bold')
+    ax1.axhline(y=0.5, color='red', linestyle='--', label='Random baseline', linewidth=2)
+    ax1.text(0, exact_agreement_rate + 0.03, f'{exact_agreement_rate:.4f}', 
+             ha='center', fontsize=12, fontweight='bold')
+    ax1.legend()
+    ax1.grid(axis='y', alpha=0.3, linestyle='--')
+    
+    # Right: Breakdown pie chart
+    labels = ['Both Agree', 'Methods Disagree']
+    sizes = [len(learned_analysis['agreements']), len(learned_analysis['disagreements'])]
+    colors = ['#66c2a5', '#fc8d62']
+    
+    wedges, texts, autotexts = ax2.pie(sizes, labels=labels, autopct='%1.1f%%', 
+                                        colors=colors, startangle=90,
+                                        textprops={'fontsize': 11, 'fontweight': 'bold'})
+    ax2.set_title('Agreement Distribution on Learned Tokens', fontsize=13, fontweight='bold')
+    
+    plt.tight_layout()
+    plt.savefig(output_path, dpi=300, bbox_inches='tight')
+    plt.close()
+    print(f"Saved agreement learned-only plot to {output_path}")
+
+
+def plot_additional_metrics(learned_analysis, output_path):
+    """Plot additional quality metrics for learned tokens."""
+    fig, axes = plt.subplots(1, 3, figsize=(16, 5))
+    
+    # Plot 1: Overlap with gold source space
+    ax1 = axes[0]
+    categories = ['RelRep', 'Vanilla']
     values = [
-        metrics['exact_agreement_rate'],
-        metrics['relrep_gold_agreement_rate'],
-        metrics['vanilla_gold_agreement_rate']
+        learned_analysis['relrep_gold_source_rate'],
+        learned_analysis['vanilla_gold_source_rate']
     ]
-    
-    colors = ['#3498db', '#95a5a6', '#95a5a6']  # Highlight the main metric
-    bars = ax.bar(categories, values, color=colors, alpha=0.7, edgecolor='black')
-    
-    # Add value labels on bars
-    for bar, value in zip(bars, values):
+    bars = ax1.bar(categories, values, color=['#2ecc71', '#e74c3c'], alpha=0.7, edgecolor='black')
+    ax1.set_ylabel('Rate', fontsize=11)
+    ax1.set_title('Overlap with Gold Source Space', fontsize=12, fontweight='bold')
+    ax1.set_ylim([0, 1.0])
+    ax1.grid(axis='y', alpha=0.3)
+    for bar, val in zip(bars, values):
         height = bar.get_height()
-        ax.text(bar.get_x() + bar.get_width()/2., height,
-                f'{value:.4f}',
-                ha='center', va='bottom', fontsize=11, fontweight='bold')
+        ax1.text(bar.get_x() + bar.get_width()/2., height,
+                f'{val:.3f}', ha='center', va='bottom', fontsize=10, fontweight='bold')
     
-    ax.set_ylabel('Agreement Rate', fontsize=12)
-    ax.set_title('Alignment Agreement Comparison\n(Non-Gold Tokens Only)', fontsize=14, fontweight='bold')
-    ax.set_ylim([0, 1.1])
-    ax.grid(axis='y', alpha=0.3, linestyle='--')
+    # Plot 2: Alignment diversity
+    ax2 = axes[1]
+    values = [
+        learned_analysis['relrep_diversity'],
+        learned_analysis['vanilla_diversity']
+    ]
+    bars = ax2.bar(categories, values, color=['#2ecc71', '#e74c3c'], alpha=0.7, edgecolor='black')
+    ax2.set_ylabel('Diversity (Unique Sources / Total)', fontsize=11)
+    ax2.set_title('Alignment Diversity', fontsize=12, fontweight='bold')
+    ax2.set_ylim([0, 1.0])
+    ax2.grid(axis='y', alpha=0.3)
+    for bar, val in zip(bars, values):
+        height = bar.get_height()
+        ax2.text(bar.get_x() + bar.get_width()/2., height,
+                f'{val:.3f}', ha='center', va='bottom', fontsize=10, fontweight='bold')
     
-    # Add annotation
-    ax.text(0.5, 0.02, f"Non-Gold Tokens: {metrics['non_gold_total']:,}",
-            transform=ax.transAxes, ha='center', fontsize=10,
+    # Plot 3: Summary statistics text
+    ax3 = axes[2]
+    ax3.axis('off')
+    stats_text = (
+        f"Learned Token Analysis Summary\n"
+        f"{'='*40}\n\n"
+        f"Total Learned Tokens: {learned_analysis['total_analyzed']:,}\n\n"
+        f"Agreements: {len(learned_analysis['agreements']):,}\n"
+        f"Disagreements: {len(learned_analysis['disagreements']):,}\n\n"
+        f"RelRep Unique Sources: {learned_analysis['relrep_unique_sources']:,}\n"
+        f"Vanilla Unique Sources: {learned_analysis['vanilla_unique_sources']:,}\n\n"
+        f"RelRep → Gold Sources: {learned_analysis['relrep_uses_gold_sources']:,}\n"
+        f"Vanilla → Gold Sources: {learned_analysis['vanilla_uses_gold_sources']:,}"
+    )
+    ax3.text(0.1, 0.5, stats_text, fontsize=10, family='monospace',
+            verticalalignment='center', transform=ax3.transAxes,
             bbox=dict(boxstyle='round', facecolor='wheat', alpha=0.5))
     
     plt.tight_layout()
     plt.savefig(output_path, dpi=300, bbox_inches='tight')
     plt.close()
-    print(f"Saved agreement bar chart to {output_path}")
-
-
-def plot_agreement_pie_chart(categories, output_path):
-    """Create pie chart showing agreement vs disagreement for non-gold tokens."""
-    fig, ax = plt.subplots(figsize=(8, 8))
-    
-    labels = ['Agree', 'Disagree']
-    sizes = [categories['agree'], categories['disagree']]
-    colors = ['#2ecc71', '#e74c3c']
-    explode = (0.05, 0.05)  # Slight separation
-    
-    wedges, texts, autotexts = ax.pie(sizes, explode=explode, labels=labels, colors=colors,
-                                      autopct='%1.1f%%', shadow=True, startangle=90,
-                                      textprops={'fontsize': 12, 'fontweight': 'bold'})
-    
-    ax.set_title('RelRep vs Vanilla Agreement\n(Non-Gold Tokens Only)', 
-                fontsize=14, fontweight='bold', pad=20)
-    
-    # Add count annotation
-    total = categories['total']
-    ax.text(0, -1.3, f'Total Non-Gold Tokens: {total:,}',
-            ha='center', fontsize=11,
-            bbox=dict(boxstyle='round', facecolor='wheat', alpha=0.5))
-    
-    plt.tight_layout()
-    plt.savefig(output_path, dpi=300, bbox_inches='tight')
-    plt.close()
-    print(f"Saved agreement pie chart to {output_path}")
+    print(f"Saved additional metrics plot to {output_path}")
 
 
 def plot_venn_diagram(metrics, output_path):
@@ -229,6 +305,12 @@ def main():
         default="./figures/relrep-vs-origin",
         help="Directory for figures"
     )
+    parser.add_argument(
+        "--vocab-size",
+        type=int,
+        default=50272,
+        help="Full target vocabulary size"
+    )
     
     args = parser.parse_args()
     
@@ -253,38 +335,53 @@ def main():
         gold_mappings = json.load(f)
     print(f"Gold mappings: {len(gold_mappings)} pairs")
     
-    # Get non-gold tokens (tokens aligned by methodology)
-    non_gold_ids = get_non_gold_tokens(align_relrep, align_vanilla, gold_mappings)
-    print(f"\nTotal tokens: {len(set(align_relrep.keys()) | set(align_vanilla.keys())):,}")
-    print(f"Gold-mapped tokens: {len(gold_mappings):,}")
-    print(f"Non-gold tokens (aligned by methodology): {len(non_gold_ids):,}")
+    # CRITICAL: Identify learned tokens using full vocabulary
+    print("\nIdentifying learned tokens...")
+    learned_tokens, gold_tokens, all_target_tokens = get_learned_tokens(
+        align_relrep, align_vanilla, gold_mappings, args.vocab_size
+    )
     
-    # Compute exact agreement for NON-GOLD tokens only
-    print("\nComputing exact agreement (NON-GOLD tokens only)...")
-    exact_matches, total_exact, exact_rate = compute_exact_agreement(align_relrep, align_vanilla, gold_mappings)
-    print(f"Exact matches: {exact_matches:,}/{total_exact:,} ({exact_rate:.4f})")
+    print(f"Total tokens: {len(all_target_tokens):,}")
+    print(f"Gold-mapped tokens: {len(gold_tokens):,}")
+    print(f"Learned tokens (aligned by methodology): {len(learned_tokens):,}")
+    
+    # Compute exact agreement for LEARNED tokens only
+    print("\n=== Exact Agreement (Learned Tokens Only) ===")
+    agreement_count, total_analyzed, exact_agreement_rate = compute_exact_agreement(
+        align_relrep, align_vanilla, learned_tokens
+    )
+    print(f"Agreement: {agreement_count:,}/{total_analyzed:,} = {exact_agreement_rate:.4f}")
     
     # Verify gold mappings are preserved (should be 100% or close)
-    print("\nVerifying gold mappings are preserved...")
+    print("\n=== Verifying Gold Mappings are Preserved ===")
     relrep_correct, relrep_total, relrep_gold_rate = compute_gold_agreement(align_relrep, gold_mappings)
     vanilla_correct, vanilla_total, vanilla_gold_rate = compute_gold_agreement(align_vanilla, gold_mappings)
     
     print(f"RelRep-Gold: {relrep_correct:,}/{relrep_total:,} ({relrep_gold_rate:.4f})")
     print(f"Vanilla-Gold: {vanilla_correct:,}/{vanilla_total:,} ({vanilla_gold_rate:.4f})")
     
-    # Analyze agreement categories for NON-GOLD tokens
-    print("\nAnalyzing agreement categories (NON-GOLD tokens only)...")
-    categories = analyze_agreement_categories(align_relrep, align_vanilla, gold_mappings)
-    print(f"Agree: {categories['agree']:,} ({categories['agree']/categories['total']*100:.2f}%)")
-    print(f"Disagree: {categories['disagree']:,} ({categories['disagree']/categories['total']*100:.2f}%)")
-    print(f"Total: {categories['total']:,}")
+    # Comprehensive analysis of learned tokens
+    print("\n=== Comprehensive Learned Token Analysis ===")
+    learned_analysis = analyze_learned_tokens(align_relrep, align_vanilla, learned_tokens, gold_mappings)
+    
+    print(f"\nAgreement/Disagreement Split:")
+    print(f"  Agreements: {len(learned_analysis['agreements']):,} ({len(learned_analysis['agreements'])/learned_analysis['total_analyzed']*100:.2f}%)")
+    print(f"  Disagreements: {len(learned_analysis['disagreements']):,} ({len(learned_analysis['disagreements'])/learned_analysis['total_analyzed']*100:.2f}%)")
+    
+    print(f"\nOverlap with Gold Source Space:")
+    print(f"  RelRep maps to gold sources: {learned_analysis['relrep_uses_gold_sources']:,}/{learned_analysis['total_analyzed']:,} = {learned_analysis['relrep_gold_source_rate']:.4f}")
+    print(f"  Vanilla maps to gold sources: {learned_analysis['vanilla_uses_gold_sources']:,}/{learned_analysis['total_analyzed']:,} = {learned_analysis['vanilla_gold_source_rate']:.4f}")
+    
+    print(f"\nAlignment Diversity:")
+    print(f"  RelRep unique sources: {learned_analysis['relrep_unique_sources']:,}/{learned_analysis['total_analyzed']:,} = {learned_analysis['relrep_diversity']:.4f}")
+    print(f"  Vanilla unique sources: {learned_analysis['vanilla_unique_sources']:,}/{learned_analysis['total_analyzed']:,} = {learned_analysis['vanilla_diversity']:.4f}")
     
     # Compile metrics
     metrics = {
-        'exact_agreement_rate': exact_rate,
-        'exact_matches': exact_matches,
-        'total_comparisons': total_exact,
-        'non_gold_total': len(non_gold_ids),
+        'exact_agreement_rate': exact_agreement_rate,
+        'agreement_count': agreement_count,
+        'total_learned_tokens': total_analyzed,
+        'learned_tokens_total': len(learned_tokens),
         'relrep_gold_agreement_rate': relrep_gold_rate,
         'relrep_gold_correct': relrep_correct,
         'relrep_gold_total': relrep_total,
@@ -292,7 +389,7 @@ def main():
         'vanilla_gold_correct': vanilla_correct,
         'vanilla_gold_total': vanilla_total,
         'total_gold_mappings': len(gold_mappings),
-        'agreement_categories': categories
+        'learned_analysis': learned_analysis
     }
     
     # Save metrics
@@ -301,10 +398,21 @@ def main():
         json.dump(metrics, f, indent=2)
     print(f"\nSaved metrics to {output_path}")
     
+    # Save agreement/disagreement lists
+    agreements_path = os.path.join(args.output_dir, "learned_tokens_agree.json")
+    disagreements_path = os.path.join(args.output_dir, "learned_tokens_disagree.json")
+    with open(agreements_path, 'w') as f:
+        json.dump([int(tid) for tid in learned_analysis['agreements']], f, indent=2)
+    with open(disagreements_path, 'w') as f:
+        json.dump([int(tid) for tid in learned_analysis['disagreements']], f, indent=2)
+    print(f"Saved agreement/disagreement lists")
+    
     # Create visualizations
     print("\nCreating visualizations...")
-    plot_agreement_bar_chart(metrics, os.path.join(args.figures_dir, "agreement_plot.png"))
-    plot_agreement_pie_chart(categories, os.path.join(args.figures_dir, "agreement_pie_chart.png"))
+    plot_agreement_learned_only(metrics, learned_analysis, 
+                               os.path.join(args.figures_dir, "agreement_learned_only.png"))
+    plot_additional_metrics(learned_analysis, 
+                           os.path.join(args.figures_dir, "additional_metrics.png"))
     
     # Only create Venn diagram if matplotlib_venn is available
     if venn2 is not None:
